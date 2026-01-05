@@ -10,7 +10,7 @@ import CategoryManagerModal from "@/components/CategoryManagerModal";
 import CartDrawer, { CartItem } from "@/components/CartDrawer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronDown, Star, X } from "lucide-react"; // 아이콘 추가
+import { ChevronDown, Star } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
@@ -23,8 +23,8 @@ export default function Home() {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   // 카테고리 및 즐겨찾기
-  const [allCategories, setAllCategories] = useState<string[]>([]); // 전체 카테고리 원본
-  const [favoriteCats, setFavoriteCats] = useState<string[]>([]); // 내가 즐겨찾기한 카테고리 (최대 2개)
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [favoriteCats, setFavoriteCats] = useState<string[]>([]); // 즐겨찾기 (최대 2개)
   const [selectedCategory, setSelectedCategory] = useState("전체");
 
   // 드롭다운 메뉴 상태
@@ -59,17 +59,22 @@ export default function Home() {
 
   const checkUserAndFetchData = async () => {
     setLoading(true);
+    // 1. 사용자 세션 확인
     const { data: { user } } = await supabase.auth.getUser();
-    setUser(user);
-
+    
     if (user) {
+      // 로그인 된 경우: 데이터 가져오기
+      setUser(user);
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
       setUserRole(profile?.role || "");
 
       await Promise.all([fetchCategories(), fetchItems(), fetchFavorites(user.id)]);
       fetchMyRentCount(user.id);
-    } else {
       setLoading(false);
+    } else {
+      // 로그인 안 된 경우: 로그인 페이지로 이동
+      setLoading(false);
+      router.push('/login');
     }
   };
 
@@ -81,7 +86,6 @@ export default function Home() {
 
   // 2. 내 즐겨찾기 가져오기
   const fetchFavorites = async (userId: string) => {
-    // created_at 순으로 정렬하여 FIFO 구현 준비
     const { data } = await supabase
       .from('category_favorites')
       .select('category_name, created_at')
@@ -95,13 +99,13 @@ export default function Home() {
 
   // 3. 즐겨찾기 토글 (최대 2개 유지 로직)
   const toggleFavorite = async (e: React.MouseEvent, catName: string) => {
-    e.stopPropagation(); // 드롭다운 닫힘 방지
+    e.stopPropagation();
     if (!user) return;
     
     const isFav = favoriteCats.includes(catName);
 
     if (isFav) {
-        // [삭제] 이미 즐겨찾기라면 해제
+        // [삭제]
         const { error } = await supabase
             .from('category_favorites')
             .delete()
@@ -109,26 +113,22 @@ export default function Home() {
             .eq('category_name', catName);
         if (!error) {
             setFavoriteCats(prev => prev.filter(c => c !== catName));
-            // 만약 현재 보고 있는 카테고리가 삭제되면 '전체'로 이동
             if (selectedCategory === catName) setSelectedCategory("전체");
         }
     } else {
-        // [추가]
-        // 만약 이미 2개라면? -> 가장 오래된 것(첫번째) 삭제 후 추가
+        // [추가] (FIFO: 2개 넘으면 오래된 것 삭제)
         let newFavList = [...favoriteCats];
         
         if (newFavList.length >= 2) {
-            const outputCat = newFavList[0]; // 가장 먼저 들어온 놈
+            const outputCat = newFavList[0];
             await supabase
                 .from('category_favorites')
                 .delete()
                 .eq('user_id', user.id)
                 .eq('category_name', outputCat);
-            
-            newFavList.shift(); // 배열 앞부분 제거
+            newFavList.shift();
         }
 
-        // DB에 새 항목 추가
         const { error } = await supabase
             .from('category_favorites')
             .insert({ user_id: user.id, category_name: catName });
@@ -146,7 +146,6 @@ export default function Home() {
       .order('created_at', { ascending: false });
     if (data) setItems(data);
     if (error) console.error(error);
-    setLoading(false);
   };
 
   const fetchMyRentCount = async (userId: string) => {
@@ -162,7 +161,7 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     setItems([]);
-    router.refresh();
+    router.push('/login'); // 로그아웃 시에도 로그인 페이지로 이동
   };
 
   // 장바구니 로직
@@ -227,7 +226,9 @@ export default function Home() {
     });
 
   if (loading) return <div className="flex justify-center items-center h-screen text-gray-500">로딩 중...</div>;
-  if (!user) return null;
+  
+  // 로그인 안 된 상태면 안내 메시지 (이미 checkUserAndFetchData에서 이동 명령 내림)
+  if (!user) return <div className="flex justify-center items-center h-screen text-gray-500">로그인 페이지로 이동 중...</div>;
 
   return (
     <main className="min-h-screen bg-gray-50 pb-20 relative">
@@ -271,11 +272,11 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 3. [개선됨] 카테고리 탭 (전체 + 즐겨찾기2개 + 풀다운) */}
+      {/* 3. 즐겨찾기 탭 + 카테고리 풀다운 */}
       <div className="bg-white border-b border-gray-100 px-4 py-2 mb-2 relative">
         <div className="max-w-7xl mx-auto flex items-center gap-2">
             
-            {/* 3-1. [전체] 버튼 */}
+            {/* [전체] 버튼 */}
             <button 
                 onClick={() => setSelectedCategory("전체")}
                 className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors border ${
@@ -287,7 +288,7 @@ export default function Home() {
                 전체
             </button>
 
-            {/* 3-2. 즐겨찾기 탭 (최대 2개 노출) */}
+            {/* 즐겨찾기 탭 (최대 2개) */}
             {favoriteCats.map((cat) => (
                 <button
                     key={cat}
@@ -303,21 +304,20 @@ export default function Home() {
                 </button>
             ))}
 
-            {/* 3-3. [카테고리 ▼] 드롭다운 버튼 */}
+            {/* [카테고리 ▼] 드롭다운 버튼 */}
             <div className="relative" ref={categoryMenuRef}>
                 <button
                     onClick={() => setIsCategoryMenuOpen(!isCategoryMenuOpen)}
                     className={`px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 transition-colors ${
                         isCategoryMenuOpen
                             ? 'border-slate-400 bg-slate-100'
-                            // 선택된 카테고리가 '전체'도 아니고 '즐겨찾기'도 아니면(즉 목록에서 선택한 경우) 드롭다운을 강조
                             : (!favoriteCats.includes(selectedCategory) && selectedCategory !== "전체")
                                 ? 'border-slate-800 bg-white text-slate-800 ring-1 ring-slate-800'
                                 : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600'
                     }`}
                 >
                     {(!favoriteCats.includes(selectedCategory) && selectedCategory !== "전체") 
-                        ? selectedCategory // 현재 선택된게 즐겨찾기에 없으면 그 이름을 표시
+                        ? selectedCategory 
                         : "카테고리"
                     }
                     <ChevronDown size={14} />
@@ -326,8 +326,6 @@ export default function Home() {
                 {/* 드롭다운 메뉴 내용 */}
                 {isCategoryMenuOpen && (
                     <div className="absolute top-full left-0 mt-2 w-56 bg-white border border-slate-200 rounded-lg shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-                        
-                        {/* 관리자용 링크 헤더 */}
                         <div className="bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500 border-b flex justify-between items-center">
                              <span>전체 카테고리</span>
                              <button onClick={() => { setIsCatManagerOpen(true); setIsCategoryMenuOpen(false); }} className="text-[10px] text-blue-500 underline hover:text-blue-700">⚙️관리</button>
@@ -347,8 +345,6 @@ export default function Home() {
                                         className={`flex items-center justify-between px-3 py-2 rounded text-sm cursor-pointer transition-colors ${isSelected ? "bg-slate-100 font-bold" : "hover:bg-slate-50"}`}
                                     >
                                         <span className={isSelected ? "text-slate-900" : "text-slate-600"}>{cat}</span>
-                                        
-                                        {/* 즐겨찾기 토글 버튼 (별표) */}
                                         <button 
                                             onClick={(e) => toggleFavorite(e, cat)}
                                             className="p-1.5 hover:bg-slate-200 rounded-full transition-colors group"
@@ -367,7 +363,6 @@ export default function Home() {
                     </div>
                 )}
             </div>
-
         </div>
       </div>
 
@@ -412,7 +407,7 @@ export default function Home() {
       <ItemDetailModal 
         isOpen={!!selectedItem}
         item={selectedItem}
-        categories={allCategories} // 수정 시에는 전체 카테고리 목록 전달
+        categories={allCategories}
         onClose={() => setSelectedItem(null)}
         onUpdate={fetchItems}
         onAddToCart={addToCart}
